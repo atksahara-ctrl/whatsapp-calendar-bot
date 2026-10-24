@@ -5,7 +5,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const pino = require('pino');
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxfSDM0LTdN7tNWdguKdiwUNvdkLC0DD5bbCaGRRQQp5WSO2qAng2RCnMTLepZ_JUwHSA/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyrAwUYbMUjDSdDy-MWh6mmeaLEM3M_dz8STo1VznJTgOtqlYvD60_dY6L5ltMWagvJPw/exec';
 const GROQ_API_KEY = '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';
 
 let qrCodeDataURL = '';
