@@ -11,7 +11,7 @@ const GROQ_API_KEY = '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';
 let qrCodeDataURL = '';
 let isConnected = false;
 
-// Render-ന് ലൈവ് ആയി തുടരാനുള്ള വെബ് സെർവർ
+// Render വെബ് സെർവർ
 const port = process.env.PORT || 3000;
 http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -32,12 +32,14 @@ http.createServer(async (req, res) => {
     console.log(`Server listening on port ${port}`);
 });
 
-// ഓഡിയോ ഫയൽ Groq Whisper വഴി ടെക്സ്റ്റാക്കി മാറ്റുന്ന ഫംഗ്ഷൻ
+// ഓഡിയോ ഫയൽ Groq Whisper വഴി കൃത്യമായ മലയാളത്തിൽ മാറ്റുന്ന ഫംഗ്ഷൻ
 async function transcribeAudioWithGroq(audioBuffer) {
     try {
         const formData = new FormData();
         formData.append('file', audioBuffer, { filename: 'audio.ogg', contentType: 'audio/ogg' });
         formData.append('model', 'whisper-large-v3');
+        formData.append('language', 'ml'); // മലയാളം ഭാഷ നിർബന്ധമാക്കുന്നു
+        formData.append('prompt', 'ഇത് കലണ്ടർ മീറ്റിംഗ്, ടാസ്ക് എന്നിവ രേഖപ്പെടുത്തുന്ന മലയാളം വോയ്‌സ് നോട്ടാണ്. സമയം: നാളെ, മറ്റന്നാൾ, മണിക്ക്, മീറ്റിംഗ്.');
 
         const response = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', formData, {
             headers: {
@@ -88,38 +90,43 @@ async function connectToWhatsApp() {
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
         for (const msg of messages) {
-            let incomingText = '';
             const remoteJid = msg.key.remoteJid;
 
-            // 1. സാധാരണ ടെക്സ്റ്റ് മെസ്സേജ് കൈകാര്യം ചെയ്യൽ
+            // ⚠️ സുരക്ഷാ മാറ്റം: സ്വന്തം അക്കൗണ്ടിൽ (Message yourself) നിന്നല്ലാതെ മറ്റുള്ളവരുടെ ചാറ്റുകളിലോ ഗ്രൂപ്പുകളിലോ ബോട്ട് പ്രവർത്തിക്കില്ല!
+            const myJid = sock.user?.id?.split(':')[0] + '@s.whatsapp.net';
+            if (remoteJid !== myJid) {
+                continue; // മറ്റുള്ളവർക്ക് അയക്കുന്ന വോയ്‌സ് നോട്ടുകൾ ബോട്ട് തൊടില്ല!
+            }
+
+            let incomingText = '';
+
+            // 1. സാധാരണ ടെക്സ്റ്റ് മെസ്സേജ്
             const textMsg = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
             if (textMsg) {
-                if (textMsg.startsWith('✅ കലണ്ടറിൽ ടാസ്ക്') || textMsg.startsWith('🎙️')) continue;
+                if (textMsg.startsWith('✅ കലണ്ടറിൽ ടാസ്ക്')) continue;
                 incomingText = textMsg;
             }
 
-            // 2. വോയ്‌സ് നോട്ട് / ഓഡിയോ മെസ്സേജ് കൈകാര്യം ചെയ്യൽ
+            // 2. സ്വന്തം ചാറ്റിൽ വരുന്ന വോയ്‌സ് നോട്ട്
             const audioMsg = msg.message?.audioMessage;
             if (audioMsg) {
                 try {
-                    console.log('Voice note received, converting using Groq Whisper...');
+                    console.log('Voice note received in self chat, converting...');
                     const buffer = await downloadMediaMessage(msg, 'buffer', {});
                     const transcription = await transcribeAudioWithGroq(buffer);
                     
                     if (transcription) {
                         console.log('Transcribed Text:', transcription);
                         incomingText = transcription;
-                        await sock.sendMessage(remoteJid, { text: `🎙️ വോയ്‌സ് തിരിച്ചറിഞ്ഞു:\n"${transcription}"` });
                     }
                 } catch (err) {
                     console.error('Audio processing error:', err.message);
                 }
             }
 
-            // 3. ലഭിച്ച ടെക്സ്റ്റ് കലണ്ടറിലേക്ക് അയക്കൽ
+            // 3. കലണ്ടറിലേക്ക് അയക്കൽ
             if (incomingText) {
                 const lower = incomingText.toLowerCase();
-                // വോയ്‌സ് നോട്ടിൽ #cal പറയാൻ ബുദ്ധിമുട്ടായതിനാൽ മീറ്റിംഗ്, കാൾ, ഡേറ്റ് സംബന്ധമായ വാക്കുകൾ ഉണ്ടെങ്കിലും പ്രോസസ്സ് ചെയ്യും
                 if (lower.includes('#cal') || lower.includes('meet') || lower.includes('വിളിക്കണം') || lower.includes('മീറ്റിംഗ്') || lower.includes('മണിക്ക്')) {
                     try {
                         console.log('Processing calendar event for:', incomingText);
@@ -130,7 +137,6 @@ async function connectToWhatsApp() {
                             const title = res.data.title || incomingText;
                             let reply = `✅ കലണ്ടറിൽ ടാസ്ക് സെറ്റ് ചെയ്തു:\n"${title}"\nതീയതി & സമയം: ${time}`;
                             
-                            // Google Meet ലിങ്ക് ഉണ്ടെങ്കിൽ അതും മെസ്സേജിൽ ചേർക്കും
                             if (res.data.meetLink) {
                                 reply += `\n🔗 Google Meet Link: ${res.data.meetLink}`;
                             }
